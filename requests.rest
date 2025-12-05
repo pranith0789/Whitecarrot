@@ -1,0 +1,11 @@
+### Create a company
+POST http://localhost:3000/api/company/create
+Content-Type: application/json
+
+{
+  "name": "Whitecarrot Test Company"
+}
+
+
+### Fetch company sections
+GET http://localhost:3000/api/company/72bb7ce4-a90d-445e-9f61-56987a76ac33/sections

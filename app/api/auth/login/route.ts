@@ -1,0 +1,69 @@
+// import { NextResponse } from "next/server";
+// import { supabaseServer } from "@/app/lib/supabase";
+
+// export async function POST(req: Request) {
+//   const { email, password } = await req.json();
+//   const supabase = supabaseServer();
+
+//   // 1️⃣ Login user
+//   const { data: login, error: loginErr } = await supabase.auth.signInWithPassword({
+//     email,
+//     password,
+//   });
+
+//   if (loginErr) {
+//     return NextResponse.json({ error: loginErr.message }, { status: 400 });
+//   }
+
+//   const userId = login.user.id;
+
+//   // 2️⃣ Get the user's company
+//   const { data: company, error: companyErr } = await supabase
+//     .from("companies")
+//     .select("id")
+//     .eq("owner_id", userId)
+//     .single();
+
+//   if (companyErr || !company) {
+//     return NextResponse.json({ error: "Company not found" }, { status: 404 });
+//   }
+
+//   return NextResponse.json({ companyId: company.id });
+// }
+
+
+import { NextResponse } from "next/server";
+import { supabaseServer } from "@/app/lib/supabase";
+
+export async function POST(req: Request) {
+  const { email, password } = await req.json();
+  const supabase = supabaseServer();
+
+  // 1. Sign in user
+  const { data: auth, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
+  const userId = auth.user.id;
+
+  // 2. Get company for this recruiter
+  const { data: company } = await supabase
+    .from("companies")
+    .select("id")
+    .eq("owner_id", userId)
+    .single();
+
+  if (!company) {
+    return NextResponse.json({ error: "No company found" }, { status: 404 });
+  }
+
+  return NextResponse.json({
+    success: true,
+    companyId: company.id
+  });
+}

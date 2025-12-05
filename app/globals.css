@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
   --background: #ffffff;
@@ -23,4 +26,360 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+@keyframes fadein {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0px);
+  }
+}
+
+.animate-fadein {
+  animation: fadein 0.8s ease-out forwards;
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 18s linear infinite;
+}
+
+@keyframes fadeIn {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.6s ease-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-6px); }
+  80% { transform: translateX(6px); }
+}
+
+.animate-shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+
+/* Smooth fade-in */
+@keyframes fadeIn {
+  0% { opacity: 0; transform: translateY(20px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate-fadeIn {
+  animation: fadeIn 0.8s ease-out forwards;
+}
+
+/* Animated gradient background */
+@keyframes gradientMove {
+  0% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+  100% { background-position: 0% 0%; }
+}
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradientMove 8s ease infinite;
+}
+
+/* Floating blur circles */
+@keyframes float {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(-20px) translateX(15px); }
+}
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes floatSlow {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(15px) translateX(-10px); }
+}
+.animate-float-slow {
+  animation: floatSlow 10s ease-in-out infinite;
+}
+
+
+@keyframes fadeIn {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.6s ease-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-6px); }
+  80% { transform: translateX(6px); }
+}
+
+.animate-shake {
+  animation: shake 0.35s ease-in-out;
+}
+
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 25s linear infinite;
+}
+
+@media (max-width: 768px) {
+  .animate-marquee {
+    animation-duration: 18s;
+  }
+}
+
+@media (min-width: 769px) {
+  .animate-marquee {
+    animation-duration: 12s;
+  }
+}
+
+@keyframes escalator {
+  0% {
+    transform: translateX(0) translateY(0);
+  }
+  100% {
+    transform: translateX(-50%) translateY(-50px);
+  }
+}
+
+/* Speed control inside Tailwind utility class */
+.animate-escalator {
+  animation: escalator 12s linear infinite;
+}
+
+
+@keyframes escalator-right {
+  0% {
+    transform: translateX(-50%) translateY(0);
+  }
+  100% {
+    transform: translateX(0%) translateY(-50px);
+  }
+}
+
+.animate-escalator-right {
+  animation: escalator-right 12s linear infinite;
+}
+
+@keyframes escalator-left {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-escalator-left {
+  animation: escalator-left 12s linear infinite;
+}
+
+
+@keyframes fade-slide {
+  0% {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-slide {
+  animation: fade-slide 1s ease-out forwards;
+}
+
+
+@keyframes fade-delay {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.animate-fade-delay {
+  animation: fade-delay 1.8s ease-out forwards;
+}
+
+.glow-text {
+  text-shadow: 0 0 12px rgba(255,255,255,0.4),
+               0 0 24px rgba(255,255,255,0.2);
+}
+
+
+.typing-text {
+  overflow: hidden;
+  white-space: nowrap;
+  border-right: 3px solid white;
+  width: 0;
+  animation: typing 3s steps(30) forwards, blink 0.8s step-end infinite;
+}
+
+@keyframes typing {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+@keyframes blink {
+  50% {
+    border-color: transparent;
+  }
+}
+
+
+@keyframes fadeIn {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 2s ease-out forwards;
+  animation-delay: 3s; /* appears after typing completes */
+  opacity: 0;
+}
+
+@keyframes typing-loop {
+  0% {
+    width: 0;
+    opacity: 1;
+  }
+  40% {
+    width: 100%;
+    opacity: 1;
+  }
+  60% {
+    width: 100%;
+    opacity: 0;
+  }
+  100% {
+    width: 0;
+    opacity: 0;
+  }
+}
+
+.typing-loop {
+  overflow: hidden;
+  white-space: nowrap;
+  border-right: 3px solid white;
+  display: inline-block;
+  animation: typing-loop 5s steps(30) infinite;
+}
+
+
+
+@keyframes fadeInSub {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in-delay {
+  animation: fadeInSub 1.5s ease-out forwards;
+  animation-delay: 2s; /* appears after typing starts */
+  opacity: 0;
+}
+
+@keyframes typing {
+  0% {
+    width: 0;
+  }
+  40% {
+    width: 100%;
+  }
+  60% {
+    width: 100%;
+  }
+  100% {
+    width: 0;
+  }
+}
+
+.typing-loop {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  border-right: 3px solid #fff;
+  animation: typing 5s steps(20) infinite, blink 0.8s step-end infinite;
+}
+
+@keyframes blink {
+  50% {
+    border-color: transparent;
+  }
+}
+
+
+.gradient-text {
+  background: linear-gradient(90deg, #ff7ce5, #ffd700, #7cf9ff);
+  background-size: 300%;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: gradientShift 6s ease-in-out infinite;
+}
+
+@keyframes gradientShift {
+  0% { background-position: 0%; }
+  50% { background-position: 100%; }
+  100% { background-position: 0%; }
+}
+
+
+@keyframes marquee-ltr {
+  0% {
+    transform: translateX(-50%);
+  }
+  100% {
+    transform: translateX(0%);
+  }
+}
+
+.animate-marquee-ltr {
+  animation: marquee-ltr 15s linear infinite;
+}
+
+@keyframes gradientFlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+
+.filter-select {
+  @apply p-3 border rounded-lg bg-gray-50 hover:bg-gray-100 cursor-pointer;
 }
