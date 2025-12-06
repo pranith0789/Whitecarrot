@@ -4,3 +4,4 @@ export { default as culture } from "./culture";
 export { default as employeeVoice } from "./employeeVoice";
 export {default as contact} from './contact'
 export {default as careers} from './CareersSection'
+export {default as custom} from './CustomSection'

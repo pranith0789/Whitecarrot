@@ -174,7 +174,7 @@ export default function LoginPage() {
         <p className="text-center text-white/90 mt-6 text-sm">
           New user?{" "}
           <button
-            onClick={() => router.push("/signup")}
+            onClick={() => router.push("/auth/signup")}
             className="text-blue-400 font-semibold hover:underline"
           >
             Create an account

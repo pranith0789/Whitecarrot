@@ -1,234 +1,240 @@
 "use client";
-
 import { useEffect, useState, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Navbar from "@/app/components/Navbar";
 import JobCard from "@/app/components/JobCard";
-import { Search } from "lucide-react";
 
 export default function CareersPage() {
+  //  const cookieStore = cookies();
+  // const supabaseAuth = createClient(cookieStore);
+
+  // const {
+  //   data: { user },
+  // } = await supabaseAuth.auth.getUser();
+
+  // if (!user) redirect("/auth/login");
   const { companyId } = useParams();
 
   const [jobs, setJobs] = useState<any[]>([]);
-  const [query, setQuery] = useState("");
-  const [filters, setFilters] = useState({
-    location: "",
-    department: "",
-    experience_level: "",
-    work_policy: "",
-    job_type: "",
-  });
+  const [loading, setLoading] = useState(true);
+
+  // Filters / Sorting
+  const [search, setSearch] = useState("");
+  const [workPolicy, setWorkPolicy] = useState("all");
+  const [experience, setExperience] = useState("all");
   const [sortBy, setSortBy] = useState("newest");
 
-  const [page, setPage] = useState(1);
-  const perPage = 10;
+  // Navbar Sections
+  const [navSections, setNavSections] = useState<any[]>([]);
 
-  // Fetch jobs
+  // Load company sections for navbar
   useEffect(() => {
-    async function loadJobs() {
-      const res = await fetch("/api/jobs");
+    async function loadSections() {
+      if (!companyId) return;
+
+      const res = await fetch(`/api/company/${companyId}/sections`);
       const data = await res.json();
-      setJobs(data.jobs || []);
+
+      if (Array.isArray(data)) {
+        const sorted = [...data].sort(
+          (a, b) => (a.position ?? 0) - (b.position ?? 0)
+        );
+
+        const normalize = (id: string) =>
+          id.toLowerCase().replace(/\s+/g, "-");
+
+        const filtered = sorted
+          .filter((s) => s.section_id !== "careers_default")
+          .map((s) => ({
+            id: normalize(s.section_id),
+            label: s.title || s.section_id,
+            position: s.position,
+          }));
+
+        setNavSections(filtered);
+      }
     }
-    loadJobs();
+
+    loadSections();
+  }, [companyId]);
+
+  // Pagination (Load More)
+  const ITEMS_PER_LOAD = 10;
+  const [visibleCount, setVisibleCount] = useState(ITEMS_PER_LOAD);
+
+  // Reset visible count whenever filters change
+  useEffect(() => {
+    setVisibleCount(ITEMS_PER_LOAD);
+  }, [search, workPolicy, experience, sortBy]);
+
+  // Load Jobs
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetch("/api/jobs");
+      const json = await res.json();
+
+      // FIX: Your API returns an array, not { jobs: [] }
+      setJobs(Array.isArray(json) ? json : json.jobs || []);
+
+      setLoading(false);
+    }
+    load();
   }, []);
 
-  const updateFilter = (key: string, value: string) => {
-    setFilters((prev) => ({ ...prev, [key]: value }));
-    setPage(1);
-  };
 
-  const removeFilter = (key: string) => {
-    setFilters((prev) => ({ ...prev, [key]: "" }));
-    setPage(1);
-  };
-
-  const parseSalary = (range: string) => {
-    if (!range) return 0;
-    const match = range.match(/(\d+)[^\d]+(\d+)/);
-    if (!match) return 0;
-    return (parseInt(match[1]) + parseInt(match[2])) / 2;
-  };
-
-  const experienceMap: Record<string, number> = {
-    Intern: 1,
-    Junior: 2,
-    Mid: 3,
-    Senior: 4,
-    Lead: 5,
-  };
-
+  // FILTER + SORT
   const filteredJobs = useMemo(() => {
-    let result = jobs.filter((job) => {
-      const matchesSearch =
-        job.title.toLowerCase().includes(query.toLowerCase()) ||
-        job.location.toLowerCase().includes(query.toLowerCase()) ||
-        job.department.toLowerCase().includes(query.toLowerCase());
+    let list = [...jobs];
 
-      const matchesLocation = !filters.location || job.location === filters.location;
-      const matchesDepartment = !filters.department || job.department === filters.department;
-      const matchesExperience = !filters.experience_level || job.experience_level === filters.experience_level;
-      const matchesPolicy = !filters.work_policy || job.work_policy === filters.work_policy;
-      const matchesJobType = !filters.job_type || job.job_type === filters.job_type;
-
-      return (
-        matchesSearch &&
-        matchesLocation &&
-        matchesDepartment &&
-        matchesExperience &&
-        matchesPolicy &&
-        matchesJobType
+    if (search.trim()) {
+      list = list.filter((job) =>
+        job.title.toLowerCase().includes(search.toLowerCase())
       );
-    });
+    }
 
-    // Sorting
-    result = result.sort((a, b) => {
-      if (sortBy === "newest") return a.posted_days_ago - b.posted_days_ago;
-      if (sortBy === "salary") return parseSalary(b.salary_range) - parseSalary(a.salary_range);
-      if (sortBy === "experience")
-        return (experienceMap[b.experience_level] || 0) -
-               (experienceMap[a.experience_level] || 0);
-      return 0;
-    });
+    if (workPolicy !== "all") {
+      list = list.filter((job) => job.work_policy === workPolicy);
+    }
 
-    return result;
-  }, [jobs, query, filters, sortBy]);
+    if (experience !== "all") {
+      list = list.filter((job) => job.experience_level === experience);
+    }
 
-  const paginatedJobs = filteredJobs.slice(0, page * perPage);
+    if (sortBy === "newest") {
+      list.sort((a, b) => b.posted_days_ago - a.posted_days_ago);
+    }
+    if (sortBy === "salary") {
+      list.sort((a, b) => {
+        const salaryA = parseInt(a.salary_range.replace(/\D/g, "")) || 0;
+        const salaryB = parseInt(b.salary_range.replace(/\D/g, "")) || 0;
+        return salaryB - salaryA;
+      });
+    }
+    if (sortBy === "experience") {
+      const order = ["Intern", "Junior", "Mid", "Senior", "Lead"];
+      list.sort(
+        (a, b) =>
+          order.indexOf(a.experience_level) -
+          order.indexOf(b.experience_level)
+      );
+    }
+
+    return list;
+  }, [jobs, search, workPolicy, experience, sortBy]);
+
+  // Visible Jobs (Load More)
+  const visibleJobs = useMemo(() => {
+    return filteredJobs.slice(0, visibleCount);
+  }, [filteredJobs, visibleCount]);
 
   return (
     <>
       {/* NAVBAR */}
       <Navbar
-        sections={[
-          { id: "intro", label: "Intro" },
-          { id: "about", label: "About Us" },
-          { id: "culture", label: "Culture" },
-          { id: "employeeVoice", label: "Employee Voice" },
-          { id: "careers", label: "Careers" },
-        ]}
-        activeSection="careers"
         companyId={companyId as string}
+        sections={navSections}
+        activeSection="careers"
       />
 
-      {/* HERO HEADER */}
-      <div className="w-full bg-gradient-to-r from-blue-600 to-blue-500 text-white py-16 mt-16">
-        <div className="max-w-5xl mx-auto text-center px-6">
-          <h1 className="text-5xl font-bold mb-3">Join Our Team</h1>
-          <p className="text-lg text-blue-100">
-            Explore roles where you can grow, innovate, and build the future with us.
+      <div className="max-w-4xl mx-auto mt-32 px-4 pb-20">
+        {/* Invisible anchors for navbar scroll */}
+        {navSections.map((sec) => (
+          <div key={sec.id} id={sec.id} className="h-0"></div>
+        ))}
+
+        <h1 className="text-4xl font-bold mb-6 text-center">
+          Open Positions
+        </h1>
+
+        {/* FILTER BAR */}
+        <div className="bg-white shadow-md p-4 rounded-lg flex flex-wrap gap-4 items-center justify-between">
+
+          <input
+            type="text"
+            placeholder="Search job title..."
+            value={search}
+            onChange={(e) => {
+              setVisibleCount(ITEMS_PER_LOAD);
+              setSearch(e.target.value);
+            }}
+            className="border rounded-lg px-3 py-2 w-full md:w-64"
+          />
+
+          <select
+            value={workPolicy}
+            onChange={(e) => {
+              setVisibleCount(ITEMS_PER_LOAD);
+              setWorkPolicy(e.target.value);
+            }}
+            className="border rounded-lg px-3 py-2 text-md text-bold font-serif"
+          >
+            <option value="all">Work Policy: None</option>
+            <option value="Remote">Remote</option>
+            <option value="Hybrid">Hybrid</option>
+            <option value="Onsite">Onsite</option>
+          </select>
+
+          <select
+            value={experience}
+            onChange={(e) => {
+              setVisibleCount(ITEMS_PER_LOAD);
+              setExperience(e.target.value);
+            }}
+            className="border rounded-lg px-3 py-2 font-serif text-md"
+          >
+            <option value="all">Experience: None</option>
+            <option value="Junior">Junior</option>
+            <option value="Mid">Mid</option>
+            <option value="Senior">Senior</option>
+          </select>
+
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="border rounded-lg px-3 py-2 font-serif"
+          >
+            <option value="newest">Newest</option>
+            <option value="salary">Highest Salary</option>
+            <option value="experience">Experience Level</option>
+          </select>
+        </div>
+
+        {/* JOB LIST */}
+        {loading ? (
+          <p className="text-center text-gray-500 mt-10">Loading jobs...</p>
+        ) : filteredJobs.length === 0 ? (
+          <p className="text-center text-gray-500 mt-10">
+            No jobs match your filters.
           </p>
-        </div>
-      </div>
-
-      <div className="max-w-6xl mx-auto py-12 px-4 flex gap-10">
-
-        {/* LEFT FILTER PANEL */}
-        <div className="w-1/4 hidden lg:block sticky top-28 h-fit bg-white shadow-md rounded-xl p-5 border">
-          <h3 className="text-lg font-semibold mb-4">Filters</h3>
-
-          <div className="flex flex-col gap-4">
-            <select className="filter-select" onChange={(e) => updateFilter("location", e.target.value)}>
-              <option value="">Location</option>
-              {Array.from(new Set(jobs.map((j) => j.location))).map((loc) => (
-                <option key={loc}>{loc}</option>
-              ))}
-            </select>
-
-            <select className="filter-select" onChange={(e) => updateFilter("department", e.target.value)}>
-              <option value="">Department</option>
-              {Array.from(new Set(jobs.map((j) => j.department))).map((dep) => (
-                <option key={dep}>{dep}</option>
-              ))}
-            </select>
-
-            <select className="filter-select" onChange={(e) => updateFilter("experience_level", e.target.value)}>
-              <option value="">Experience Level</option>
-              {Array.from(new Set(jobs.map((j) => j.experience_level))).map((exp) => (
-                <option key={exp}>{exp}</option>
-              ))}
-            </select>
-
-            <select className="filter-select" onChange={(e) => updateFilter("work_policy", e.target.value)}>
-              <option value="">Work Policy</option>
-              {Array.from(new Set(jobs.map((j) => j.work_policy))).map((wp) => (
-                <option key={wp}>{wp}</option>
-              ))}
-            </select>
-
-            <select className="filter-select" onChange={(e) => updateFilter("job_type", e.target.value)}>
-              <option value="">Job Type</option>
-              {Array.from(new Set(jobs.map((j) => j.job_type))).map((jt) => (
-                <option key={jt}>{jt}</option>
-              ))}
-            </select>
+        ) : (
+          <div className="grid grid-cols-1 gap-6 mt-10">
+            {visibleJobs.map((job: any) => (
+              <JobCard key={job.id} job={job} />
+            ))}
           </div>
-        </div>
+        )}
 
-        {/* RIGHT CONTENT */}
-        <div className="flex-1">
-
-          {/* SEARCH BAR */}
-          <div className="relative mb-6">
-            <Search className="absolute left-3 top-3 text-gray-400" size={20} />
-            <input
-              type="text"
-              placeholder="Search job title, department or location..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full pl-10 p-3 border rounded-xl shadow-sm"
-            />
-          </div>
-
-          {/* SORT ROW */}
-          <div className="flex justify-end mb-4">
-            <select
-              className="p-2 border rounded-lg"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-            >
-              <option value="newest">Newest</option>
-              <option value="salary">Highest Salary</option>
-              <option value="experience">Experience Level</option>
-            </select>
-          </div>
-
-          {/* FILTER CHIPS */}
-          <div className="flex flex-wrap gap-2 mb-6">
-            {Object.entries(filters).map(([key, value]) =>
-              value ? (
-                <span
-                  key={key}
-                  onClick={() => removeFilter(key)}
-                  className="px-4 py-2 bg-blue-100 text-blue-700 rounded-full cursor-pointer text-sm"
-                >
-                  {key.replace("_", " ")}: {value} ✕
-                </span>
-              ) : null
-            )}
-          </div>
-
-          {/* JOB LIST */}
-          {paginatedJobs.length > 0 ? (
-            <div className="flex flex-col gap-6">
-              {paginatedJobs.map((job, index) => (
-                <JobCard key={index} job={job} />
-              ))}
-            </div>
-          ) : (
-            <p className="text-center text-gray-500 text-lg mt-10">No jobs found.</p>
-          )}
-
-          {/* LOAD MORE */}
-          {paginatedJobs.length < filteredJobs.length && (
+        {/* LOAD MORE BUTTON */}
+        {filteredJobs.length > visibleCount && (
+          <div className="flex justify-center mt-10">
             <button
-              onClick={() => setPage(page + 1)}
-              className="mt-10 mx-auto block px-8 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-md"
+              onClick={() =>
+                setVisibleCount((prev) => prev + ITEMS_PER_LOAD)
+              }
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition shadow"
             >
               Load More Jobs
             </button>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* END MESSAGE */}
+        {filteredJobs.length <= visibleCount && filteredJobs.length > 0 && (
+          <p className="text-center text-gray-500 mt-10">
+            You've reached the end.
+          </p>
+        )}
       </div>
     </>
   );

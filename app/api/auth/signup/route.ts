@@ -1,119 +1,11 @@
-// import { NextResponse } from "next/server";
-// import { supabaseServer } from "@/app/lib/supabase";
-// import { defaultSections } from "@/app/lib/SectionsConfig";
-
-// export async function POST(req: Request) {
-//   const { email, password } = await req.json();
-//   const supabase = supabaseServer();
-
-//   // 1️⃣ Create user
-//   const { data: auth, error: authErr } = await supabase.auth.admin.createUser({
-//     email,
-//     password,
-//     email_confirm: true,
-//   });
-
-//   if (authErr) return NextResponse.json({ error: authErr.message }, { status: 400 });
-
-//   const userId = auth.user.id;
-
-//   // 2️⃣ Create a company for this recruiter
-//   const { data: company, error: compErr } = await supabase
-//     .from("companies")
-//     .insert({ name: email + "'s Company", owner_id: userId })
-//     .select()
-//     .single();
-
-//   if (compErr) return NextResponse.json({ error: compErr.message }, { status: 500 });
-
-//   const companyId = company.id;
-
-//   // 3️⃣ Insert default company sections
-//   const payload = defaultSections.map((s, i) => ({
-//     company_id: companyId,
-//     section_id: s.id,
-//     position: i + 1,
-//     bg_color: "#ffffff",
-//     content: {},
-//   }));
-
-//   await supabase.from("company_sections").insert(payload);
-
-//   return NextResponse.json({ success: true, companyId });
-// }
-
-// import { NextResponse } from "next/server";
-// import { supabaseServer } from "@/app/lib/supabase";
-// import { defaultSections } from "@/app/lib/SectionsConfig";
-
-// export async function POST(req: Request) {
-//   const { email, password } = await req.json();
-//   const supabase = supabaseServer();
-
-//   // 1. Create user
-//   const { data: auth, error: authErr } = await supabase.auth.admin.createUser({
-//     email,
-//     password,
-//     email_confirm: true,
-//   });
-
-//   if (authErr) {
-//     return NextResponse.json({ error: authErr.message }, { status: 400 });
-//   }
-
-//   const userId = auth.user.id;
-
-//   // 2. Create company
-//   const { data: company, error: compErr } = await supabase
-//     .from("companies")
-//     .insert({
-//       name: `${email}'s Company`,
-//       owner_id: userId
-//     })
-//     .select()
-//     .single();
-
-//   if (compErr) {
-//     return NextResponse.json({ error: compErr.message }, { status: 500 });
-//   }
-
-//   const companyId = company.id;
-
-//   // 3. Insert default sections
-//   const initialSections = defaultSections.map((s, index) => ({
-//     company_id: companyId,
-//     section_id: s.id,
-//     position: index + 1,
-//     bg_color: "#ffffff",
-//     content: {},
-//   }));
-
-//   await supabase.from("company_sections").insert(initialSections);
-
-//   // 4. Return companyId so FE can redirect
-//   return NextResponse.json({ success: true, companyId });
-// }
-
-
-// File: app/api/auth/signup/route.ts
-
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/app/lib/supabase";
-import { defaultSections } from "@/app/lib/SectionsConfig";
 
 export async function POST(req: Request) {
   const { email, password, companyName } = await req.json();
   const supabase = supabaseServer();
 
-  // 1. Validate input
-  if (!email || !password || !companyName) {
-    return NextResponse.json(
-      { error: "Email, password, and company name are required" },
-      { status: 400 }
-    );
-  }
-
-  // 2. Create User
+  // 1. Create User
   const { data: auth, error: authErr } = await supabase.auth.admin.createUser({
     email,
     password,
@@ -126,32 +18,50 @@ export async function POST(req: Request) {
 
   const userId = auth.user.id;
 
-  // 3. Create Company with user-provided name
+  // 2. Create Company
   const { data: company, error: compErr } = await supabase
     .from("companies")
-    .insert({
-      name: companyName.trim(),
-      owner_id: userId,
-    })
+    .insert({ name: companyName, owner_id: userId })
     .select()
     .single();
 
   if (compErr) {
-    return NextResponse.json({ error: compErr.message }, { status: 500 });
+    return NextResponse.json({ error: compErr.message }, { status: 400 });
   }
 
   const companyId = company.id;
 
-  // 4. Insert default sections for the company
-  const initialSections = defaultSections.map((section, index) => ({
+  // 3. Fetch all template rows (ORDER BY position is required!)
+  const { data: templates, error: tplErr } = await supabase
+    .from("section_templates")
+    .select("*")
+    .eq("is_default",true)
+    .order("position", { ascending: true });
+
+  if (tplErr || !templates || templates.length === 0) {
+    return NextResponse.json(
+      { error: "No templates found in DB." },
+      { status: 500 }
+    );
+  }
+
+  // 4. Insert default sections (one entry per template)
+  const defaultSections = templates.map((tpl, index) => ({
     company_id: companyId,
-    section_id: section.id,
+    section_id: tpl.id, // MUST match renderer key, e.g., intro_video
+    type: tpl.type,
+    content: tpl.content ?? {}, // safe JSON
     position: index + 1,
-    bg_color: "#ffffff",
-    content: {},
+    bg_color: tpl.bg_color ?? "#ffffff",
   }));
 
-  await supabase.from("company_sections").insert(initialSections);
+  const { error: insertErr } = await supabase
+    .from("company_sections")
+    .insert(defaultSections);
+
+  if (insertErr) {
+    return NextResponse.json({ error: insertErr.message }, { status: 500 });
+  }
 
   return NextResponse.json({ success: true, companyId });
 }

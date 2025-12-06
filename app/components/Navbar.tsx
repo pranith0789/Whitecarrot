@@ -1,215 +1,115 @@
 "use client";
 
 import { useRouter, usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
-import { SquarePen } from "lucide-react";
+import { SquarePen, LogOut } from "lucide-react";
 
-interface NavProps {
-  sections: { id: string; label: string }[];
-  activeSection?: string; // passed manually for pages like Careers
-  companyId?: string;
-}
-
-export default function Navbar({ sections, activeSection, companyId }: NavProps) {
+export default function Navbar({ sections, companyId, activeSection }: any) {
   const router = useRouter();
   const pathname = usePathname();
 
-  const [current, setCurrent] = useState(activeSection || "");
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const observedIdsRef = useRef<string[]>([]);
+  const orderedSections = [...sections].sort(
+    (a: any, b: any) => (a.position ?? 0) - (b.position ?? 0)
+  );
 
-  // Helper: find DOM element for a section id with tolerant fallbacks
-  function findElementForId(id: string): HTMLElement | null {
-    // try direct id
-    let el = document.getElementById(id);
-    if (el) return el;
+  // Scroll or redirect
+  const scrollToSection = (id: string) => {
+    const isCareersPage = pathname.includes("/careers");
 
-    // try kebab-case, snake_case, lower-case variants
-    const variants = [
-      id,
-      id.replace(/([A-Z])/g, "-$1").toLowerCase(), // camel -> kebab
-      id.replace(/([A-Z])/g, "_$1").toLowerCase(), // camel -> snake
-      id.toLowerCase(),
-      id.replace(/_/g, "-"),
-      id.replace(/-/g, "_"),
-    ];
-    for (const v of variants) {
-      el = document.getElementById(v);
-      if (el) return el;
-    }
-
-    // try data-section attribute (optional)
-    return document.querySelector<HTMLElement>(`[data-section="${id}"]`) ?? null;
-  }
-
-  // Setup IntersectionObserver
-  useEffect(() => {
-    // if manual activeSection provided (e.g. Careers page), use that initially
-    if (activeSection) {
-      setCurrent(activeSection);
-    }
-
-    // only run scrollspy on company pages (exclude careers page path)
-    const isCompanyMainPage = pathname?.startsWith(`/company/${companyId}`) && !pathname?.includes("/careers");
-    if (!isCompanyMainPage) {
+    if (isCareersPage) {
+      router.push(`/company/${companyId}#${id}`);
       return;
     }
 
-    // Disconnect any previous observer
-    if (observerRef.current) {
-      observerRef.current.disconnect();
-      observerRef.current = null;
-      observedIdsRef.current = [];
+    const el = document.getElementById(id);
+    if (el) {
+      window.scrollTo({
+        top: el.offsetTop - 90,
+        behavior: "smooth",
+      });
     }
+  };
 
-    // Create observer
-    const observer = new IntersectionObserver(
-      (entries) => {
-        // choose the entry closest to top (largest intersectionRatio or smallest boundingClientRect.top)
-        const visible = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => {
-            // prefer larger intersectionRatio, then smaller top
-            if (b.intersectionRatio !== a.intersectionRatio) return b.intersectionRatio - a.intersectionRatio;
-            return a.boundingClientRect.top - b.boundingClientRect.top;
-          });
+  const handleLogout = async () => {
+  await fetch("/api/logout", { method: "POST" });
+  router.push("/auth/login");
+  };
 
-        if (visible.length > 0) {
-          const id = visible[0].target.getAttribute("id") || visible[0].target.getAttribute("data-section") || "";
-          if (id && id !== current) {
-            setCurrent(id);
-          }
-        }
-      },
-      {
-        root: null,
-        rootMargin: "-25% 0px -60% 0px", // when section reaches ~25% from top it becomes active
-        threshold: [0, 0.1, 0.25, 0.5, 0.75, 1],
-      }
-    );
-
-    observerRef.current = observer;
-
-    // helper to (re)observe sections
-    function observeSections() {
-      const ids: string[] = [];
-      for (const sec of sections) {
-        const el = findElementForId(sec.id);
-        if (el) {
-          observer.observe(el);
-          ids.push(sec.id);
-        }
-      }
-      observedIdsRef.current = ids;
-      // run a tick to pick up current visible
-      // small delay to allow layout stabilization
-      setTimeout(() => {
-        // trigger manual check: get all entries via getBoundingClientRect
-        const candidates = observedIdsRef.current
-          .map((id) => findElementForId(id))
-          .filter(Boolean) as HTMLElement[];
-
-        // pick candidate closest to top third
-        let bestId = "";
-        let bestScore = Infinity;
-        for (const el of candidates) {
-          const rect = el.getBoundingClientRect();
-          const score = Math.abs(rect.top - window.innerHeight * 0.25);
-          if (score < bestScore) {
-            bestScore = score;
-            bestId = el.id || el.getAttribute("data-section") || "";
-          }
-        }
-        if (bestId && bestId !== current) setCurrent(bestId);
-      }, 120);
-    }
-
-    // first attempt
-    observeSections();
-
-    // fallback: if some elements appear later (images, async content), re-run observe after delay(s)
-    const recheckTimers: number[] = [];
-    recheckTimers.push(window.setTimeout(observeSections, 600));
-    recheckTimers.push(window.setTimeout(observeSections, 2000));
-
-    // Also observe DOM changes (optional) — re-scan when body height changes
-    let lastBodyHeight = document.body.scrollHeight;
-    const heightCheck = window.setInterval(() => {
-      if (document.body.scrollHeight !== lastBodyHeight) {
-        lastBodyHeight = document.body.scrollHeight;
-        observeSections();
-      }
-    }, 1000);
-    // clean up
-    return () => {
-      observer.disconnect();
-      observerRef.current = null;
-      recheckTimers.forEach((t) => clearTimeout(t));
-      clearInterval(heightCheck);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, sections, companyId, activeSection]); // re-run when sections/companyId change
-
-  // Listen to hash changes (cross-page anchor navigation)
-  useEffect(() => {
-    function onHash() {
-      const h = window.location.hash.replace("#", "");
-      if (h) setCurrent(h);
-    }
-    window.addEventListener("hashchange", onHash);
-    // initial check in case user came with hash
-    onHash();
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
-
-  // If parent explicitly sets activeSection (e.g. Careers page), prefer it
-  useEffect(() => {
-    if (activeSection) setCurrent(activeSection);
-  }, [activeSection]);
 
   return (
-    <nav className="fixed top-0 left-0 w-full bg-white shadow z-50 py-4 px-6">
-      <div className="max-w-7xl mx-auto flex justify-between items-center">
+    <nav className="fixed top-0 left-0 w-full h-16 bg-white/90 backdrop-blur-md shadow-sm z-[999]">
+      <div className="max-w-7xl mx-auto flex items-center justify-between h-full px-6">
 
-        {/* LEFT: Sections */}
-        <ul className="flex gap-8 text-lg">
-          {sections
-            .filter((sec) => sec.id !== "careers")
-            .map((sec) => (
+        {/* LEFT SIDE — NAV LINKS */}
+        <ul className="flex items-center gap-8">
+          {orderedSections
+            .filter((s: any) => s.id !== "careers")
+            .map((sec: any) => (
               <li key={sec.id}>
-                <a
-                  href={`/company/${companyId}#${sec.id}`}
-                  className={`transition font-medium ${
-                    current === sec.id
-                      ? "text-blue-600 underline underline-offset-4"
-                      : "text-gray-500 hover:text-blue-600"
-                  }`}
+                <button
+                  onClick={() => scrollToSection(sec.id)}
+                  className={`
+                    relative font-medium tracking-wide transition text-sm
+                    ${activeSection === sec.id
+                      ? "text-blue-600"
+                      : "text-gray-600 hover:text-blue-600"}
+                  `}
                 >
-                  {sec.label}
-                </a>
+                  {sec.label.toUpperCase()}
+
+                  {/* Underline Animation */}
+                  <span
+                    className={`
+                      absolute left-0 bottom-[-4px] h-[2px] w-full rounded-full bg-blue-600 transition-all 
+                      ${activeSection === sec.id ? "opacity-100" : "opacity-0"}
+                    `}
+                  />
+                </button>
               </li>
             ))}
         </ul>
 
-        {/* RIGHT: Careers + Edit */}
-        <div className="flex items-center gap-6">
+        {/* RIGHT SIDE — Careers + Edit + Logout */}
+        <div className="flex items-center gap-6 ml-auto">
+
+          {/* Careers (Right-Aligned Special Tab) */}
           <a
             href={`/company/${companyId}/careers`}
-            className={`font-medium text-lg transition ${
-              current === "careers"
-                ? "text-blue-600 underline underline-offset-4"
-                : "text-gray-600 hover:text-blue-600"
-            }`}
+            className={`
+              relative font-medium text-sm tracking-wide transition
+              ${pathname.includes("/careers")
+                ? "text-blue-600"
+                : "text-gray-600 hover:text-blue-600"}
+            `}
           >
-            Careers
+            CAREERS
+
+            {/* Underline Animation */}
+            <span
+              className={`
+                absolute left-0 bottom-[-4px] h-[2px] w-full rounded-full bg-blue-600 transition-all
+                ${pathname.includes("/careers") ? "opacity-100" : "opacity-0"}
+              `}
+            />
           </a>
 
+          {/* Edit Button */}
           <button
             onClick={() => router.push(`/company/${companyId}/edit`)}
-            className="text-gray-600 hover:text-blue-600 transition"
+            className="p-2 rounded-md hover:bg-gray-100 transition"
+            title="Edit Company Page"
           >
-            <SquarePen size={22} />
+            <SquarePen size={20} className="text-gray-600 hover:text-blue-600" />
           </button>
+
+          {/* Logout Button */}
+          <button
+            onClick={handleLogout}
+            className="p-2 rounded-md hover:bg-red-50 transition"
+            title="Logout"
+          >
+            <LogOut size={22} className="text-gray-600 hover:text-red-600" />
+          </button>
+
         </div>
       </div>
     </nav>

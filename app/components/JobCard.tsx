@@ -4,14 +4,14 @@ import { ArrowRight } from "lucide-react";
 
 export default function JobCard({ job }: any) {
   return (
-    <div className="p-6 rounded-xl shadow-md bg-white border border-gray-200 hover:shadow-lg transition">
+    <div className="p-6 rounded-3xl shadow-md bg-white border border-gray-200 hover:shadow-lg transition">
       {/* Job Title */}
       <h2 className="text-2xl font-semibold mb-3 text-gray-800">
         {job.title}
       </h2>
 
       {/* Job Information Grid */}
-      <div className="grid grid-cols-2 gap-3 text-gray-700 text-sm">
+      <div className="grid grid-cols-2 gap-3 text-gray-700 text-md">
 
         <p><strong>Work Policy:</strong> {job.work_policy}</p>
         <p><strong>Location:</strong> {job.location}</p>

@@ -1,521 +1,913 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { v4 as uuidv4 } from "uuid";
+import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
+import { ArrowLeft } from "lucide-react";
 
 /**
- * CompanyEditPageClient.tsx
- *
- * - Left column: current company sections (compact preview, draggable)
- * - Right column: suggested sections + suggested content (addable)
- * - Uses your existing API endpoints: GET / POST / PUT / DELETE to /api/company/:companyId/sections
- * - When user adds a suggested section it is INSERTED into the company sections table
- * - Reordering persists positions to server and calls router.refresh() so Server Components update
+ * Types
  */
+type JSONValue = string | number | boolean | null | JSONObject | JSONArray;
+interface JSONObject { [k: string]: JSONValue }
+interface JSONArray extends Array<JSONValue> {}
 
-type SectionRow = {
+interface CompanySection {
   id: string;
   company_id?: string;
-  type?: string;
+  section_id?: string; // canonical template id
+  type?: string; // for legacy
   title?: string | null;
-  content?: any;
+  content: JSONObject;
   position: number;
   bg_color?: string;
   created_at?: string;
-};
+}
 
-// Suggested templates with prefilled content
-const SUGGESTED = [
-  { id: "intro", label: "Intro" },
-  { id: "about", label: "About Us" },
-  { id: "culture", label: "Culture" },
-  { id: "employeeVoice", label: "Employee Voice" },
-  { id: "contact", label: "Contact" },
-  { id: "careers", label: "Careers" },
-];
+interface Template {
+  id: string; // template id (section_templates.id)
+  name: string;
+  type: string; // e.g. "intro_video", "about_left"
+  content: JSONObject; // default content structure
+  bg_color?: string;
+}
 
-const SUGGESTED_CONTENT: Record<string, { title: string; body: string }> = {
-  intro: {
-    title: "Welcome to our company",
-    body: "We’re building products that make life better. Join us to shape the future.",
-  },
-  about: {
-    title: "About Us",
-    body: "We are a team of passionate engineers, designers and product people focused on impact.",
-  },
-  culture: {
-    title: "Our Culture",
-    body: "We believe in ownership, transparent communication, and continuous learning.",
-  },
-  employeeVoice: {
-    title: "Employee Voice",
-    body: "\"This company empowers me to learn, experiment and grow.\" — Employee A",
-  },
-  contact: {
-    title: "Contact",
-    body: "Get in touch at careers@example.com or visit our office.",
-  },
-  careers: {
-    title: "Open Roles",
-    body: "Explore open roles and apply to join our team.",
-  },
-};
+/**
+ * ------- Custom Editors for specific templates (B: custom UI per template)
+ *
+ * Each editor receives:
+ *   section: CompanySection
+ *   onChange: (patch) => void  // merges into section.content
+ *
+ * For complex nested editors (FAQ, CultureCards etc.) we provide
+ * a reasonable production-style UI with add/remove/reorder inside.
+ */
 
+/* ---------- Editor: IntroVideo ---------- */
+function IntroVideoEditor({ section, onChange }: { section: CompanySection; onChange: (c: JSONObject) => void }) {
+  const content = section.content || {};
+  const headline = String(content["headline"] ?? "");
+  const subtext = String(content["subtext"] ?? "");
+  const video = String(content["video"] ?? "");
+
+  return (
+    <div className="space-y-3">
+      <label className="block text-sm font-medium">Headline</label>
+      <input value={headline} onChange={(e) => onChange({ ...content, headline: e.target.value })} className="w-full p-2 border rounded" />
+
+      <label className="block text-sm font-medium">Subtext</label>
+      <textarea value={subtext} onChange={(e) => onChange({ ...content, subtext: e.target.value })} className="w-full p-2 border rounded" />
+
+      <label className="block text-sm font-medium">Background video URL</label>
+      <input value={video} onChange={(e) => onChange({ ...content, video: e.target.value })} className="w-full p-2 border rounded" />
+    </div>
+  );
+}
+
+/* ---------- Editor: AboutLeft ---------- */
+function AboutLeftEditor({ section, onChange }: { section: CompanySection; onChange: (c: JSONObject) => void }) {
+  const content = section.content || {};
+  const title = String(content["title"] ?? "");
+  const description = String(content["description"] ?? "");
+  const image = String(content["image"] ?? "");
+
+  return (
+    <div className="space-y-3">
+      <label className="block text-sm font-medium">Title</label>
+      <input value={title} onChange={(e) => onChange({ ...content, title: e.target.value })} className="w-full p-2 border rounded" />
+
+      <label className="block text-sm font-medium">Description</label>
+      <textarea value={description} onChange={(e) => onChange({ ...content, description: e.target.value })} className="w-full p-2 border rounded" />
+
+      <label className="block text-sm font-medium">Image URL</label>
+      <input value={image} onChange={(e) => onChange({ ...content, image: e.target.value })} className="w-full p-2 border rounded" />
+    </div>
+  );
+}
+
+/* ---------- Editor: CultureCards ---------- */
+function CultureCardsEditor({ section, onChange }: { section: CompanySection; onChange: (c: JSONObject) => void }) {
+  const content = section.content || {};
+  const items = Array.isArray(content["items"]) ? (content["items"] as any[]) : [];
+
+  function updateItem(i: number, patch: any) {
+    const next = items.map((it, idx) => (idx === i ? { ...it, ...patch } : it));
+    onChange({ ...content, items: next });
+  }
+  function addItem() {
+    onChange({ ...content, items: [...items, { title: "New", body: "" }] });
+  }
+  function removeItem(i: number) {
+    const next = items.filter((_, idx) => idx !== i);
+    onChange({ ...content, items: next });
+  }
+
+  return (
+    <div className="space-y-3">
+      {items.map((it: any, i: number) => (
+        <div key={i} className="p-3 border rounded flex gap-2 items-start">
+          <div className="flex-1">
+            <input value={it.title} onChange={(e) => updateItem(i, { title: e.target.value })} className="w-full p-2 border rounded mb-2" />
+            <textarea value={it.body} onChange={(e) => updateItem(i, { body: e.target.value })} className="w-full p-2 border rounded" />
+          </div>
+          <div>
+            <button onClick={() => removeItem(i)} className="px-2 py-1 text-sm text-red-600">Remove</button>
+          </div>
+        </div>
+      ))}
+
+      <div>
+        <button onClick={addItem} className="px-3 py-2 bg-green-600 text-white rounded">Add Card</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Editor: EmployeeVoice ---------- */
+function EmployeeVoiceEditor({ section, onChange }: { section: CompanySection; onChange: (c: JSONObject) => void }) {
+  const content = section.content || {};
+  const quotes = Array.isArray(content["quotes"]) ? (content["quotes"] as any[]) : [];
+
+  function updateQuote(i: number, patch: any) {
+    const next = quotes.map((q, idx) => (idx === i ? { ...q, ...patch } : q));
+    onChange({ ...content, quotes: next });
+  }
+  function addQuote() {
+    onChange({ ...content, quotes: [...quotes, { author: "Author", body: "Quote" }] });
+  }
+  function removeQuote(i: number) {
+    onChange({ ...content, quotes: quotes.filter((_, idx) => idx !== i) });
+  }
+
+  return (
+    <div className="space-y-3">
+      {quotes.map((q: any, i: number) => (
+        <div key={i} className="p-3 border rounded flex gap-2">
+          <div className="flex-1">
+            <input value={q.author} onChange={(e) => updateQuote(i, { author: e.target.value })} className="w-full p-2 border rounded mb-2" />
+            <textarea value={q.body} onChange={(e) => updateQuote(i, { body: e.target.value })} className="w-full p-2 border rounded" />
+          </div>
+          <div>
+            <button onClick={() => removeQuote(i)} className="px-2 py-1 text-red-600">Remove</button>
+          </div>
+        </div>
+      ))}
+      <div>
+        <button onClick={addQuote} className="px-3 py-2 bg-green-600 text-white rounded">Add Quote</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Editor: FAQ (repeater of Q/A) ---------- */
+function FAQEditor({ section, onChange }: { section: CompanySection; onChange: (c: JSONObject) => void }) {
+  const content = section.content || {};
+  const faqs = Array.isArray(content["faqs"]) ? (content["faqs"] as any[]) : [];
+
+  function updateFAQ(i: number, patch: any) {
+    const next = faqs.map((f, idx) => (idx === i ? { ...f, ...patch } : f));
+    onChange({ ...content, faqs: next });
+  }
+  function addFAQ() {
+    onChange({ ...content, faqs: [...faqs, { q: "Question", a: "Answer" }] });
+  }
+  function removeFAQ(i: number) {
+    onChange({ ...content, faqs: faqs.filter((_, idx) => idx !== i) });
+  }
+
+  return (
+    <div className="space-y-3">
+      {faqs.map((f: any, i: number) => (
+        <div key={i} className="p-3 border rounded">
+          <input value={f.q} onChange={(e) => updateFAQ(i, { q: e.target.value })} className="w-full p-2 border rounded mb-2" />
+          <textarea value={f.a} onChange={(e) => updateFAQ(i, { a: e.target.value })} className="w-full p-2 border rounded" />
+          <div className="mt-2"><button onClick={() => removeFAQ(i)} className="text-red-600">Remove</button></div>
+        </div>
+      ))}
+      <button onClick={addFAQ} className="px-3 py-2 bg-green-600 text-white rounded">Add FAQ</button>
+    </div>
+  );
+}
+
+/* ---------- Editor: Stats (number cards) ---------- */
+function StatsEditor({ section, onChange }: { section: CompanySection; onChange: (c: JSONObject) => void }) {
+  const content = section.content || {};
+  const stats = Array.isArray(content["stats"]) ? (content["stats"] as any[]) : [];
+
+  function updateStat(i: number, patch: any) {
+    const next = stats.map((s, idx) => (idx === i ? { ...s, ...patch } : s));
+    onChange({ ...content, stats: next });
+  }
+  function addStat() {
+    onChange({ ...content, stats: [...stats, { label: "Metric", number: "0" }] });
+  }
+  function removeStat(i: number) {
+    onChange({ ...content, stats: stats.filter((_, idx) => idx !== i) });
+  }
+
+  return (
+    <div className="space-y-3">
+      {stats.map((s: any, i: number) => (
+        <div key={i} className="p-3 border rounded flex gap-2 items-center">
+          <input value={s.label} onChange={(e) => updateStat(i, { label: e.target.value })} className="p-2 border rounded w-1/3" />
+          <input value={s.number} onChange={(e) => updateStat(i, { number: e.target.value })} className="p-2 border rounded w-1/3" />
+          <button onClick={() => removeStat(i)} className="text-red-600">Remove</button>
+        </div>
+      ))}
+      <button onClick={addStat} className="px-3 py-2 bg-green-600 text-white rounded">Add Stat</button>
+    </div>
+  );
+}
+
+/* ---------- Editor: Awards ---------- */
+function AwardsEditor({ section, onChange }: { section: CompanySection; onChange: (c: JSONObject) => void }) {
+  const content = section.content || {};
+  const items = Array.isArray(content["items"]) ? (content["items"] as any[]) : [];
+
+  function updateItem(i: number, patch: any) {
+    const next = items.map((it, idx) => (idx === i ? { ...it, ...patch } : it));
+    onChange({ ...content, items: next });
+  }
+  function addItem() {
+    onChange({ ...content, items: [...items, { title: "Award", year: "2025", image: "" }] });
+  }
+  function removeItem(i: number) {
+    onChange({ ...content, items: items.filter((_, idx) => idx !== i) });
+  }
+
+  return (
+    <div className="space-y-3">
+      {items.map((it: any, i: number) => (
+        <div key={i} className="p-3 border rounded flex gap-2">
+          <input value={it.title} onChange={(e) => updateItem(i, { title: e.target.value })} className="p-2 border rounded w-1/3" />
+          <input value={it.year} onChange={(e) => updateItem(i, { year: e.target.value })} className="p-2 border rounded w-1/6" />
+          <input value={it.image} onChange={(e) => updateItem(i, { image: e.target.value })} className="p-2 border rounded flex-1" />
+          <button onClick={() => removeItem(i)} className="text-red-600">Remove</button>
+        </div>
+      ))}
+      <button onClick={addItem} className="px-3 py-2 bg-green-600 text-white rounded">Add Award</button>
+    </div>
+  );
+}
+
+/* ---------- Editor: WhyJoinUs ---------- */
+function WhyJoinUsEditor({ section, onChange }: { section: CompanySection; onChange: (c: JSONObject) => void }) {
+  const content = section.content || {};
+  const points = Array.isArray(content["points"]) ? (content["points"] as any[]) : [];
+
+  function updatePoint(i: number, patch: any) {
+    const next = points.map((p, idx) => (idx === i ? { ...p, ...patch } : p));
+    onChange({ ...content, points: next });
+  }
+  function addPoint() {
+    onChange({ ...content, points: [...points, { title: "Reason", body: "" }] });
+  }
+  function removePoint(i: number) {
+    onChange({ ...content, points: points.filter((_, idx) => idx !== i) });
+  }
+
+  return (
+    <div className="space-y-3">
+      {points.map((p: any, i: number) => (
+        <div key={i} className="p-3 border rounded">
+          <input value={p.title} onChange={(e) => updatePoint(i, { title: e.target.value })} className="w-full p-2 border rounded mb-2" />
+          <textarea value={p.body} onChange={(e) => updatePoint(i, { body: e.target.value })} className="w-full p-2 border rounded" />
+          <div className="mt-2"><button onClick={() => removePoint(i)} className="text-red-600">Remove</button></div>
+        </div>
+      ))}
+      <button onClick={addPoint} className="px-3 py-2 bg-green-600 text-white rounded">Add Reason</button>
+    </div>
+  );
+}
+
+/* ---------- Editor: DEI (Diversity, Equity & Inclusion) ---------- */
+function DEIEditor({ section, onChange }: { section: CompanySection; onChange: (c: JSONObject) => void }) {
+  const content = section.content || {};
+  const pillars = Array.isArray(content["pillars"]) ? (content["pillars"] as any[]) : [];
+  const description = String(content["description"] ?? "");
+  const title = String(content["title"] ?? "");
+
+  function updatePillar(i: number, patch: any) {
+    const next = pillars.map((p, idx) => (idx === i ? { ...p, ...patch } : p));
+    onChange({ ...content, pillars: next });
+  }
+  function addPillar() {
+    onChange({ ...content, pillars: [...pillars, { title: "Pillar", body: "" }] });
+  }
+  function removePillar(i: number) {
+    onChange({ ...content, pillars: pillars.filter((_, idx) => idx !== i) });
+  }
+
+  return (
+    <div className="space-y-3">
+      <label className="block text-sm font-medium">Title</label>
+      <input value={title} onChange={(e) => onChange({ ...content, title: e.target.value })} className="w-full p-2 border rounded" />
+
+      <label className="block text-sm font-medium">Description</label>
+      <textarea value={description} onChange={(e) => onChange({ ...content, description: e.target.value })} className="w-full p-2 border rounded" />
+
+      <div className="pt-2">
+        <h4 className="font-semibold mb-2">Pillars</h4>
+        {pillars.map((p: any, i: number) => (
+          <div key={i} className="p-2 border rounded mb-2">
+            <input value={p.title} onChange={(e) => updatePillar(i, { title: e.target.value })} className="w-full p-2 border rounded mb-1" />
+            <textarea value={p.body} onChange={(e) => updatePillar(i, { body: e.target.value })} className="w-full p-2 border rounded" />
+            <div className="mt-2"><button onClick={() => removePillar(i)} className="text-red-600">Remove</button></div>
+          </div>
+        ))}
+        <button onClick={addPillar} className="px-3 py-2 bg-green-600 text-white rounded">Add Pillar</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Editor Switcher: chooses proper editor by section.type / section.section_id ---------- */
+function EditorSwitcher({ section, onContentChange }: { section: CompanySection; onContentChange: (c: JSONObject) => void }) {
+  const key = (section.section_id || section.type || "").toLowerCase();
+
+  switch (key) {
+    case "intro":
+    case "intro_video":
+      return <IntroVideoEditor section={section} onChange={onContentChange} />;
+    case "about":
+    case "about_left":
+      return <AboutLeftEditor section={section} onChange={onContentChange} />;
+    case "culture":
+    case "culture_cards":
+      return <CultureCardsEditor section={section} onChange={onContentChange} />;
+    case "employeevoice":
+    case "employee_voice":
+      return <EmployeeVoiceEditor section={section} onChange={onContentChange} />;
+    case "faq":
+    case "faq_section":
+      return <FAQEditor section={section} onChange={onContentChange} />;
+    case "stats":
+    case "numbers":
+      return <StatsEditor section={section} onChange={onContentChange} />;
+    case "awards":
+    case "awards_section":
+      return <AwardsEditor section={section} onChange={onContentChange} />;
+    case "whyjoin":
+    case "why_join_us":
+      return <WhyJoinUsEditor section={section} onChange={onContentChange} />;
+    case "dei":
+    case "dei_section":
+      return <DEIEditor section={section} onChange={onContentChange} />;
+    default:
+      // Generic fallback: simple object editor (key/value)
+      const content = section.content || {};
+      return (
+        <div className="space-y-2">
+          {Object.entries(content).map(([k, v]) => (
+            <div key={k}>
+              <label className="block text-sm">{k}</label>
+              <input value={String(v ?? "")} onChange={(e) => onContentChange({ ...content, [k]: e.target.value })} className="w-full p-2 border rounded" />
+            </div>
+          ))}
+          <div className="text-sm text-gray-500 mt-2">No specific editor available for this template — generic fields above.</div>
+        </div>
+      );
+  }
+}
+
+/* ---------- Small Preview Renderers (simplified) ---------- */
+function PreviewRenderer({ section }: { section: CompanySection }) {
+  const key = (section.section_id || section.type || "").toLowerCase();
+  const c = section.content || {};
+
+  // Very lightweight previews that match the production look roughly
+  switch (key) {
+    case "intro":
+    case "intro_video":
+      return (
+        <div className="rounded-lg overflow-hidden relative min-h-[220px] bg-black text-white p-6">
+          <div className="text-2xl font-bold">{String(c.headline ?? section.title ?? "Welcome")}</div>
+          <div className="mt-2 text-sm">{String(c.subtext ?? "")}</div>
+        </div>
+      );
+    case "about":
+    case "about_left":
+      return (
+        <div className="rounded-lg overflow-hidden grid grid-cols-1 md:grid-cols-2 bg-white border">
+          <div className="bg-cover bg-center" style={{ backgroundImage: `url(${String(c.image ?? "/AboutUS.png")})`, minHeight: 160 }} />
+          <div className="p-6">
+            <h3 className="text-xl font-bold">{String(c.title ?? section.title ?? "About Us")}</h3>
+            <p className="mt-2 text-gray-600">{String(c.description ?? "")}</p>
+          </div>
+        </div>
+      );
+    case "culture":
+    case "culture_cards":
+      return (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {(Array.isArray(c.items) ? c.items : []).slice(0, 3).map((it: any, i: number) => (
+            <div key={i} className="p-4 border rounded bg-white">
+              <div className="font-semibold">{String(it.title ?? "")}</div>
+              <div className="text-sm text-gray-600 mt-1">{String(it.body ?? "")}</div>
+            </div>
+          ))}
+        </div>
+      );
+    case "employeevoice":
+    case "employee_voice":
+      return (
+        <div className="space-y-3">
+          {(Array.isArray(c.quotes) ? c.quotes : []).slice(0, 2).map((q: any, i: number) => (
+            <blockquote key={i} className="p-3 border rounded bg-gray-50">
+              <div className="italic">"{String(q.body ?? "")}"</div>
+              <div className="mt-1 font-semibold">— {String(q.author ?? "")}</div>
+            </blockquote>
+          ))}
+        </div>
+      );
+    default:
+      return <pre className="p-3 bg-gray-50 border rounded text-sm">{JSON.stringify(section.content, null, 2)}</pre>;
+  }
+}
+
+/* ---------- Main Edit Page Client Component ---------- */
 export default function CompanyEditPageClient() {
+  //  const cookieStore = cookies();
+  // const supabaseAuth = createClient(cookieStore);
+
+  // const {
+  //   data: { user },
+  // } = await supabaseAuth.auth.getUser();
+
+  // if (!user) redirect("/auth/login");
+  // if (!user) redirect("/auth/login");
   const params = useParams() as { companyId?: string };
   const router = useRouter();
-  const companyId = params?.companyId || "";
+  const companyId = params?.companyId ?? "";
 
-  const [sections, setSections] = useState<SectionRow[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [sections, setSections] = useState<CompanySection[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [selectedSection, setSelectedSection] = useState<CompanySection | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [saving, setSaving] = useState<boolean>(false);
 
-  // Local editing buffer for currently active section
-  const [editTitle, setEditTitle] = useState("");
-  const [editBody, setEditBody] = useState("");
-
-  // Fetch sections
-  async function loadSections() {
+  // Load company sections & templates
+  useEffect(() => {
     if (!companyId) return;
     setLoading(true);
-    try {
-      const res = await fetch(`/api/company/${companyId}/sections`);
-      const data = await res.json();
-      const mapped = (Array.isArray(data) ? data : []).map((r: any) => ({
-        id: r.id || uuidv4(),
-        company_id: r.company_id,
-        type: r.type ?? r.section_id ?? "unknown",
-        title: r.title ?? null,
-        content: r.content ?? {},
-        position: Number(r.position ?? 0),
-        bg_color: r.bg_color ?? "#ffffff",
-        created_at: r.created_at,
-      }));
-      mapped.sort((a: any, b: any) => a.position - b.position);
-      setSections(mapped);
-    } catch (err) {
-      console.error("Failed to load sections", err);
-    } finally {
-      setLoading(false);
-    }
-  }
+    (async () => {
+      try {
+        const sres = await fetch(`/api/company/${companyId}/sections`);
+        const sjson = await sres.json();
+        const filtered = Array.isArray(sjson)
+        ? sjson.filter((s: any) => s.section_id !== "careers_default")
+        : [];
+        const tres = await fetch(`/api/template`); // per your request: /api/templates
+        let tjson = [];
+        if (tres.ok) {
+          tjson = await tres.json();
+        } else {
+          // templates endpoint missing -> fallback to empty array
+          tjson = [];
+        }
 
-  useEffect(() => {
-    loadSections();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // Normalize: ensure arrays
+        setSections(Array.isArray(sjson) ? sjson : []);
+        setTemplates(Array.isArray(tjson) ? tjson : []);
+      } catch (err) {
+        console.error("Load error", err);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [companyId]);
 
-  function normalize(row: any): SectionRow {
-    return {
-      id: row.id ?? uuidv4(),
-      company_id: row.company_id,
-      type: row.type ?? row.section_id ?? "unknown",
-      title: row.title ?? null,
-      content: row.content ?? {},
-      position: Number(row.position ?? 0),
-      bg_color: row.bg_color ?? "#ffffff",
-      created_at: row.created_at,
-    };
-  }
-
-  // Add suggested with prefilled content (POST)
-  async function addSuggestedWithContent(typeId: string) {
-    if (!companyId) return;
-    const template = SUGGESTED_CONTENT[typeId];
-    if (!template) return alert("Unknown template");
-
-    const position = (sections?.length ?? 0) + 1;
-    const payload = {
-      section_id: typeId,
-      type: typeId,
-      title: template.title,
-      content: { body: template.body },
-      bg_color: "#ffffff",
-      position,
-    };
-
-    try {
-      const res = await fetch(`/api/company/${companyId}/sections`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error("Create failed");
-      const newSection = await res.json();
-      setSections((prev) => (prev ? [...prev, normalize(newSection)] : [normalize(newSection)]));
-      router.refresh();
-    } catch (err) {
-      console.error("Add suggested failed", err);
-      alert("Failed to add section");
+  // Select first when nothing selected
+  useEffect(() => {
+    if (!selectedSection && sections.length > 0) {
+      setSelectedSection(sections[0]);
     }
-  }
+  }, [sections, selectedSection]);
 
-  // Add custom section (POST)
+  // ---------- CRUD helpers (POST / PUT / DELETE via existing endpoints) ----------
   async function addCustomSection() {
     if (!companyId) return;
-    const position = (sections?.length ?? 0) + 1;
     const payload = {
       type: "custom",
       title: "New section",
-      content: { body: "" },
+      content: { body: "Edit me" },
+      position: (sections.length || 0) + 1,
       bg_color: "#ffffff",
-      position,
     };
-    try {
-      const res = await fetch(`/api/company/${companyId}/sections`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error("Create failed");
-      const newSection = await res.json();
-      setSections((prev) => (prev ? [...prev, normalize(newSection)] : [normalize(newSection)]));
-      router.refresh();
-    } catch (err) {
-      console.error("addCustomSection failed", err);
-      alert("Failed to add section");
+    const res = await fetch(`/api/company/${companyId}/sections`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) {
+      alert("Failed to create section");
+      return;
     }
+    const created = await res.json();
+    setSections((p) => [...p, created]);
+    setSelectedSection(created);
   }
 
-  // Remove section (DELETE)
+  async function addTemplateToCompany(tpl: Template) {
+    if (!companyId) return;
+    const payload = {
+      section_id: tpl.id, // DB column referring to template id
+      type: tpl.type,
+      title: tpl.content?.title ?? tpl.name,
+      content: tpl.content,
+      position: (sections.length || 0) + 1,
+      bg_color: tpl.bg_color ?? "#ffffff",
+    };
+    const res = await fetch(`/api/company/${companyId}/sections`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (!res.ok) {
+      alert("Failed to add template to company");
+      return;
+    }
+
+    const created = await res.json();
+    setSections((p) => [...p, created]);
+    setSelectedSection(created);
+  }
+
   async function removeSection(id: string) {
     if (!companyId) return;
-    if (!confirm("Are you sure you want to remove this section?")) return;
+    if (!confirm("Remove section?")) return;
+    // Optimistic UI
     const prev = sections;
-    setSections((s) => s?.filter((x) => x.id !== id) ?? null);
+    setSections((s) => s.filter((x) => x.id !== id));
+    if (selectedSection?.id === id) setSelectedSection(null);
 
-    try {
-      const res = await fetch(`/api/company/${companyId}/sections`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
-      if (!res.ok) throw new Error("Delete failed");
-      router.refresh();
-    } catch (err) {
-      console.error("Delete failed", err);
-      alert("Failed to delete section");
-      setSections(prev ?? null);
+    const res = await fetch(`/api/company/${companyId}/sections`, {
+      method: "DELETE",
+      body: JSON.stringify({ id }),
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) {
+      alert("Failed to delete");
+      setSections(prev);
     }
   }
 
-  // Save single section (PUT)
-  async function saveSection(section: SectionRow) {
+  async function saveSection(section: CompanySection) {
     if (!companyId) return;
-    try {
-      const payload = {
-        id: section.id,
-        section_id: section.type,
-        type: section.type,
-        title: section.title,
-        content: section.content,
-        position: section.position,
-        bg_color: section.bg_color,
-      };
-      const res = await fetch(`/api/company/${companyId}/sections`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error("Save failed");
-      const updated = await res.json();
-      setSections((prev) => prev?.map((s) => (s.id === updated.id ? normalize(updated) : s)) ?? null);
-      router.refresh();
-    } catch (err) {
-      console.error("saveSection error", err);
+    setSaving(true);
+
+    const payload = {
+      id: section.id,
+      section_id: section.section_id ?? section.type,
+      type: section.type,
+      title: section.title,
+      content: section.content,
+      position: section.position,
+      bg_color: section.bg_color,
+    };
+
+    const res = await fetch(`/api/company/${companyId}/sections`, {
+      method: "PUT", // keep compatibility with your existing PUT handler
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (!res.ok) {
       alert("Failed to save section");
+      setSaving(false);
+      return;
     }
+
+    const updated = await res.json();
+    setSections((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    setSelectedSection(updated);
+    setSaving(false);
   }
 
-  // Save full order (iterates and updates positions)
-  async function saveOrder() {
-    if (!companyId || !sections) return;
+  // Save order: iterate and PUT positions (keeps compatible)
+  async function saveOrder(newList: CompanySection[]) {
+    if (!companyId) return;
     setSaving(true);
     try {
-      for (let i = 0; i < sections.length; i++) {
-        const s = sections[i];
+      for (let i = 0; i < newList.length; i++) {
+        const s = newList[i];
         await fetch(`/api/company/${companyId}/sections`, {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: s.id,
             position: i + 1,
-            type: s.type,
-            title: s.title,
-            content: s.content,
-            bg_color: s.bg_color,
           }),
+          headers: { "Content-Type": "application/json" },
         });
       }
-      router.refresh();
-      await loadSections();
     } catch (err) {
       console.error("saveOrder error", err);
-      alert("Failed to save order");
+      alert("Failed to persist order");
     } finally {
       setSaving(false);
     }
   }
 
-  // Update color (optimistic + persist)
-  async function updateColor(id: string, color: string) {
-    setSections((prev) => prev?.map((s) => (s.id === id ? { ...s, bg_color: color } : s)) ?? null);
-    try {
-      await fetch(`/api/company/${companyId}/sections`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, bg_color: color }),
-      });
-      router.refresh();
-    } catch (err) {
-      console.error("updateColor failed", err);
-      alert("Failed to update color");
-      await loadSections();
-    }
+  // ---------- Drag & Drop ----------
+  function handleDragEnd(result: DropResult) {
+    if (!result.destination) return;
+    const start = result.source.index;
+    const end = result.destination.index;
+    const next = Array.from(sections);
+    const [moved] = next.splice(start, 1);
+    next.splice(end, 0, moved);
+
+    // reindex positions in-memory
+    const reindexed = next.map((s, idx) => ({ ...s, position: idx + 1 }));
+    setSections(reindexed);
+    // persist
+    saveOrder(reindexed);
   }
 
-  // Inline edit: open editor for a section
-  function openEditor(section: SectionRow) {
-    setActiveSectionId(section.id);
-    setEditTitle(section.title ?? "");
-    setEditBody(section.content?.body ?? "");
-    const el = document.getElementById(`section-${section.id}`);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  // ---------- Editor content patch helper ----------
+  function patchSelectedContent(patch: JSONObject) {
+    if (!selectedSection) return;
+    const next: CompanySection = { ...selectedSection, content: { ...(selectedSection.content || {}), ...patch } };
+    setSelectedSection(next);
+    // reflect in list (optimistic)
+    setSections((prev) => prev.map((s) => (s.id === next.id ? next : s)));
   }
 
-  // Commit inline edits to local state and persist
-  async function commitEdits() {
-    if (!activeSectionId || !sections) return;
-    const next = sections.map((s) =>
-      s.id === activeSectionId ? { ...s, title: editTitle, content: { ...(s.content ?? {}), body: editBody } } : s
-    );
-    setSections(next);
-    const s = next.find((x) => x.id === activeSectionId)!;
-    await saveSection(s);
-    setActiveSectionId(null);
+  // ---------- Save selected section (saveSection uses PUT) ----------
+  async function handleSaveSelected() {
+    if (!selectedSection) return;
+    await saveSection(selectedSection);
   }
 
-  // Drag handlers
-  function onDragStart(e: React.DragEvent, id: string) {
-    setDraggingId(id);
-    try {
-      e.dataTransfer.setData("text/plain", id);
-    } catch (_) {}
-    e.dataTransfer.effectAllowed = "move";
-  }
-
-  function onDragOver(e: React.DragEvent, overId: string) {
-    e.preventDefault();
-    if (!draggingId || draggingId === overId || !sections) return;
-
-    const from = sections.findIndex((s) => s.id === draggingId);
-    const to = sections.findIndex((s) => s.id === overId);
-    if (from === -1 || to === -1) return;
-
-    const next = [...sections];
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
-
-    // Update in-memory positions for instant UI feedback
-    setSections(next.map((s, i) => ({ ...s, position: i + 1 })));
-  }
-
-  async function onDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDraggingId(null);
-    await saveOrder();
-  }
-
-  // Small compact card used in the left panel
-  function CompactSectionCard({ s, idx }: { s: SectionRow; idx: number }) {
-    return (
-      <div
-        id={`section-${s.id}`}
-        key={s.id}
-        draggable
-        onDragStart={(e) => onDragStart(e, s.id)}
-        onDragOver={(e) => onDragOver(e, s.id)}
-        onDrop={onDrop}
-        className="flex items-start gap-3 p-3 border rounded-md hover:shadow transition cursor-move bg-white"
-        style={{ backgroundColor: s.bg_color }}
-        aria-roledescription="draggable section"
-      >
-        <div className="flex flex-col items-center gap-2 w-8">
-          <div className="h-8 w-8 flex items-center justify-center rounded bg-white text-gray-600 border">{idx + 1}</div>
-        </div>
-
-        <div className="flex-1">
-          <div className="flex justify-between items-start">
-            <div>
-              <div className="font-medium text-sm truncate max-w-[160px]">{s.title ?? s.type}</div>
-              <div className="text-xs text-gray-600">{s.type} • Position {idx + 1}</div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                aria-label="background color"
-                type="color"
-                value={s.bg_color ?? "#ffffff"}
-                onChange={(e) => updateColor(s.id, e.target.value)}
-                title="Change section background"
-                className="h-8 w-8 p-0 border rounded"
-              />
-              <button onClick={() => openEditor(s)} className="px-2 py-1 text-xs border rounded bg-white" title="Edit content">Edit</button>
-              <button onClick={() => removeSection(s.id)} className="px-2 py-1 text-xs text-red-600">Remove</button>
-            </div>
-          </div>
-
-          <div className="mt-2 p-2 bg-gray-50 rounded text-xs text-gray-700 line-clamp-3">
-            {s.content?.body ? s.content.body : <span className="text-gray-400">No content — click Edit</span>}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Suggested panel item
-  function SuggestedCard({ id, label }: { id: string; label: string }) {
-    const content = SUGGESTED_CONTENT[id];
-    return (
-      <div className="border rounded-lg p-4 bg-white">
-        <div className="flex justify-between items-start">
-          <div>
-            <h4 className="font-semibold">{label}</h4>
-            <div className="text-xs text-gray-500 mt-1 line-clamp-4">{content?.body}</div>
-          </div>
-          <div>
-            <button
-              onClick={() => addSuggestedWithContent(id)}
-              className="px-3 py-1 bg-blue-600 text-white rounded text-sm"
-            >
-              Add
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Live preview (small simplified preview for right-side optional use)
-  function LivePreview() {
-    return (
-      <div className="rounded-lg border overflow-hidden bg-white">
-        <div className="p-4 bg-white border-b sticky top-0 z-10">
-          <h3 className="font-semibold">Live Company Preview</h3>
-          <div className="text-xs text-gray-500">This reflects the company page (live)</div>
-        </div>
-
-        <div className="p-4 space-y-4 bg-gray-50">
-          {!sections || sections.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">No sections to preview</div>
-          ) : (
-            sections.map((s) => (
-              <section key={s.id} id={`preview-${s.id}`} className="rounded-md overflow-hidden shadow-sm" style={{ backgroundColor: s.bg_color }}>
-                <div className="max-w-4xl mx-auto p-6">
-                  <h4 className="text-xl font-bold">{s.title ?? prettifyType(s.type)}</h4>
-                  <div className="mt-2 text-gray-700">
-                    {s.content?.body ? <div className="prose max-w-none">{s.content.body}</div> : <div className="text-sm text-gray-500 italic">No content yet</div>}
-                  </div>
-                </div>
-              </section>
-            ))
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  function prettifyType(t: string | undefined) {
-    if (!t) return "Section";
-    return String(t).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  }
+  if (loading) return <div className="p-10 text-center">Loading edit page...</div>;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-8xl mx-auto grid grid-cols-12 gap-6">
+    <div className="min-h-screen bg-gray-50 p-6 relative">
+      <button
+        onClick={() => router.push(`/company/${companyId}`)}
+        title="Exit Editor"
+        className="
+          absolute top-1 right-4 
+          p-2 rounded-full 
+          bg-white/90 
+          border border-gray-300 
+          shadow-md 
+          hover:bg-gray-100 
+          transition 
+          backdrop-blur-sm
+          z-50
+        "
+      >
+        <ArrowLeft className="h-6 w-6 text-gray-700" />
+      </button>
 
-        {/* Left column - current sections (compact list) */}
-        <div className="col-span-5 bg-white rounded-lg shadow p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold">Current Sections</h2>
-            <div className="flex items-center gap-2">
-              <button onClick={() => loadSections()} className="px-3 py-1 border rounded bg-white" title="Reload from server">Refresh</button>
-              <button onClick={() => saveOrder()} disabled={saving} className="px-3 py-1 bg-blue-600 text-white rounded">{saving ? "Saving..." : "Save Order"}</button>
-            </div>
-          </div>
+      <div className="max-w-8xl mx-auto px-4 md:px-6 py-4 
+                grid grid-cols-12 gap-6">
 
-          <div className="mb-3 flex gap-2">
-            <button onClick={() => addCustomSection()} className="px-3 py-1 border rounded bg-white text-sm">+ Add custom</button>
-            <div className="flex gap-2">
-              {SUGGESTED.slice(0, 3).map((s) => (
-                <button key={s.id} onClick={() => addSuggestedWithContent(s.id)} className="px-3 py-1 bg-green-600 text-white rounded text-sm">Add {s.label}</button>
-              ))}
-            </div>
-          </div>
+  {/* LEFT PANEL — Company Sections */}
+  <div className="
+      col-span-12 
+      md:col-span-5 
+      lg:col-span-3 
+      bg-white rounded-xl shadow border p-4 
+      h-[70vh] md:h-[75vh] lg:h-[80vh] 
+      overflow-y-auto
+  ">
 
-          <div className="space-y-3">
-            {loading && <div className="py-6 text-center text-gray-500">Loading...</div>}
-            {!loading && (!sections || sections.length === 0) && <div className="p-6 text-center text-gray-500">No sections yet</div>}
+    {/* Sticky Header */}
+    <div className="sticky top-0 bg-white pb-3 mb-3 z-10 border-b">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold">Company Sections</h2>
 
-            {sections?.map((sec, idx) => (
-              <CompactSectionCard key={sec.id} s={sec} idx={idx} />
-            ))}
-          </div>
-        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => router.push(`/company/${companyId}/careers/edit`)}
+            className="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 transition text-sm"
+          >
+            Careers
+          </button>
 
-        {/* Right column - suggested sections + preview/editor */}
-        <div className="col-span-7 bg-white rounded-lg shadow p-4">
-          <div className="flex items-start justify-between mb-4 gap-4">
-            <div>
-              <h2 className="text-xl font-bold">Suggested Sections</h2>
-              <div className="text-sm text-gray-500">Click Add to insert the suggested section into this company's page</div>
-            </div>
+          <button
+            onClick={async () => {
+              setLoading(true);
+              const res = await fetch(`/api/company/${companyId}/sections`);
+              const j = await res.json();
+              const filtered = Array.isArray(j)
+                ? j.filter((s) => s.section_id !== "careers_default")
+                : [];
+              setSections(filtered);
+              setLoading(false);
+            }}
+            className="px-3 py-1 border rounded bg-gray-100 hover:bg-gray-200 transition text-sm"
+          >
+            Reload
+          </button>
 
-            <div className="ml-auto flex items-center gap-2">
-              <button onClick={() => loadSections()} className="px-3 py-1 border rounded bg-white" title="Reload from server">Refresh</button>
-              <button onClick={() => saveOrder()} disabled={saving} className="px-3 py-1 bg-blue-600 text-white rounded">{saving ? "Saving..." : "Save Order"}</button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            {SUGGESTED.map((s) => (
-              <SuggestedCard key={s.id} id={s.id} label={s.label} />
-            ))}
-          </div>
-
-          <div className="mb-4">
-            <h3 className="font-semibold mb-2">Editor</h3>
-            {!activeSectionId && <div className="text-sm text-gray-500">Select a section from the left to edit its content.</div>}
-
-            {activeSectionId && (
-              <div>
-                <div className="mb-3">
-                  <label className="block text-sm text-gray-600 mb-1">Title</label>
-                  <input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="w-full border rounded px-2 py-1" />
-                </div>
-
-                <div className="mb-3">
-                  <label className="block text-sm text-gray-600 mb-1">Body</label>
-                  <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} className="w-full border rounded px-2 py-2 min-h-[160px]" placeholder="Markdown or plain text (rendered in preview)" />
-                </div>
-
-                <div className="flex gap-2">
-                  <button onClick={() => commitEdits()} className="px-3 py-1 bg-blue-600 text-white rounded">Save section</button>
-                  <button onClick={() => setActiveSectionId(null)} className="px-3 py-1 border rounded">Cancel</button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <h3 className="font-semibold mb-2">Live Preview</h3>
-            <LivePreview />
-          </div>
+          <button
+            onClick={addCustomSection}
+            className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm"
+          >
+            + Custom
+          </button>
         </div>
       </div>
     </div>
-  );
+
+    {/* Draggable List */}
+    <DragDropContext onDragEnd={handleDragEnd}>
+      <Droppable droppableId="company-sections">
+        {(provided) => (
+          <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-3">
+            {sections.map((s, idx) => (
+              <Draggable key={s.id} draggableId={s.id} index={idx}>
+                {(prov) => (
+                  <div
+                    ref={prov.innerRef}
+                    {...prov.draggableProps}
+                    {...prov.dragHandleProps}
+                    onClick={() => setSelectedSection(s)}
+                    className={`p-3 rounded-lg border cursor-pointer transition flex justify-between items-center ${
+                      selectedSection?.id === s.id
+                        ? "bg-blue-50 border-blue-300 shadow-sm"
+                        : "bg-white hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="truncate">
+                      <div className="font-medium">{s.title ?? s.section_id}</div>
+                      <div className="text-xs text-gray-500">
+                        pos {s.position} • {s.section_id}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={s.bg_color ?? "#ffffff"}
+                        onChange={async (e) => {
+                          const color = e.target.value;
+                          setSections(prev =>
+                            prev.map((p) =>
+                              p.id === s.id ? { ...p, bg_color: color } : p
+                            )
+                          );
+                          await fetch(`/api/company/${companyId}/sections`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ id: s.id, bg_color: color }),
+                          });
+                        }}
+                        className="h-7 w-7 p-0 border rounded cursor-pointer"
+                      />
+
+                      <button
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          removeSection(s.id);
+                        }}
+                        className="text-red-600 text-xs hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </Draggable>
+            ))}
+
+            {provided.placeholder}
+          </div>
+        )}
+      </Droppable>
+    </DragDropContext>
+  </div>
+
+  {/* CENTER PANEL — Editor */}
+  <div className="
+      col-span-12 
+      md:col-span-7 
+      lg:col-span-6 
+      bg-white rounded-xl shadow border p-4 
+      h-fit
+  ">
+
+    {/* Sticky Header */}
+    <div className="sticky top-0 bg-white pb-3 mb-3 z-10 border-b">
+      <div className="flex justify-between items-center flex-wrap gap-3">
+        <h2 className="text-lg font-semibold">Editor</h2>
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => selectedSection && saveSection(selectedSection)}
+            disabled={!selectedSection || saving}
+            className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition"
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+
+          <button
+            onClick={() => {
+              if (selectedSection) {
+                setSelectedSection({
+                  ...selectedSection,
+                  content: selectedSection.content ?? {},
+                });
+              }
+            }}
+            className="px-3 py-1 border rounded text-sm"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {!selectedSection ? (
+      <p className="text-gray-500 mt-6">Select a section from the left to edit its fields.</p>
+    ) : (
+      <div className="space-y-4">
+        {/* Title */}
+        <div>
+          <label className="block text-sm font-medium">Title (optional)</label>
+          <input
+            value={selectedSection.title ?? ""}
+            onChange={(e) => {
+              const next = { ...selectedSection, title: e.target.value };
+              setSelectedSection(next);
+              setSections(prev => prev.map((s) => (s.id === next.id ? next : s)));
+            }}
+            className="w-full p-2 border rounded-lg"
+          />
+        </div>
+
+        {/* Template Editor */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Template Editor</label>
+          <div className="p-4 border rounded-lg bg-gray-50">
+            <EditorSwitcher
+              section={selectedSection}
+              onContentChange={(c) => patchSelectedContent(c)}
+            />
+          </div>
+        </div>
+
+        {/* Preview */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Preview</label>
+          <div className="p-4 border rounded-lg bg-white shadow-sm">
+            <PreviewRenderer section={selectedSection} />
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+
+  {/* RIGHT PANEL — Templates */}
+  <div className="
+      col-span-12 
+      lg:col-span-3 
+      bg-white rounded-xl shadow border p-4 
+      h-[70vh] md:h-[75vh] lg:h-[80vh] 
+      overflow-y-auto
+  ">
+
+    {/* Sticky Header */}
+    <div className="sticky top-0 bg-white pb-3 mb-3 z-10 border-b">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Templates</h2>
+        <button onClick={() => router.refresh()} className="px-2 py-1 border rounded text-sm">
+          Reload
+        </button>
+      </div>
+    </div>
+
+    <div className="space-y-3">
+      {templates.length === 0 && (
+        <p className="text-sm text-gray-500">No templates available.</p>
+      )}
+
+      {templates.map((tpl) => (
+        <div
+          key={tpl.id}
+          className="p-3 border rounded-lg hover:bg-gray-50 transition flex justify-between items-center"
+        >
+          <div>
+            <div className="font-medium">{tpl.name}</div>
+            <div className="text-xs text-gray-500">{tpl.type}</div>
+          </div>
+
+          <button
+            onClick={() => addTemplateToCompany(tpl)}
+            className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+          >
+            Add
+          </button>
+        </div>
+      ))}
+    </div>
+  </div>
+
+</div>
+
+  </div>  );
 }
